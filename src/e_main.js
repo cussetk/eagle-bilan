@@ -12,7 +12,7 @@ function renderAuth() {
     <button class="btn btn-primary btn-block" data-act="auth-recheck" ${busy}>J'ai été ajouté(e), vérifier</button><button class="btn btn-ghost btn-block" data-act="logout">Se déconnecter</button>`;
   } else if (s === "signup") {
     body = `<h1 style="font-size:28px;text-align:center">Créer mon compte</h1>
-    <label class="field" for="au-name">Prénom<input id="au-name" type="text" autocomplete="given-name"></label>
+    <label class="field" for="au-name">Prénom<input id="au-name" type="text" autocomplete="given-name" value="${esc(A.name || "")}"></label>
     <label class="field" for="au-email">E-mail<input id="au-email" type="email" autocomplete="email" value="${esc(A.email)}"></label>
     <label class="field" for="au-pw">Mot de passe (8 caractères minimum)<input id="au-pw" type="password" autocomplete="new-password"></label>${msg}
     <button class="btn btn-primary btn-block" data-act="auth-signup" ${busy}>Créer mon compte</button>
@@ -45,8 +45,12 @@ function renderAuth() {
 }
 const fv = (id) => (($("#" + id) || {}).value || "").trim();
 async function authRun(fn) {
+  /* On lit les champs AVANT de redessiner le formulaire (sinon ils seraient vides). */
+  const F = { name: fv("au-name"), email: fv("au-email").toLowerCase(), pw: ($("#au-pw") || {}).value || "", otp: fv("au-otp").replace(/\s/g, "") };
+  if (F.name) S.auth.name = F.name;
+  if (F.email) S.auth.email = F.email;
   S.auth.busy = true; S.auth.msg = ""; S.auth.msgOk = false; render();
-  try { await fn(); } catch (e) { console.error(e); S.auth.msg = authMessage(e) || "Connexion impossible. Vérifie ta connexion internet."; }
+  try { await fn(F); } catch (e) { console.error(e); S.auth.msg = authMessage(e) || "Connexion impossible. Vérifie ta connexion internet."; }
   S.auth.busy = false; render();
 }
 async function afterSignIn() {
@@ -67,21 +71,21 @@ async function loadData() {
 const A = {
   nav: (el) => go(el.dataset.v),
   "auth-screen": (el) => { const e = fv("au-email"); if (e) S.auth.email = e; S.auth.screen = el.dataset.v; S.auth.msg = ""; render(); },
-  "auth-login": () => authRun(async () => {
-    const email = fv("au-email").toLowerCase(), pw = ($("#au-pw") || {}).value || ""; S.auth.email = email;
+  "auth-login": () => authRun(async (F) => {
+    const email = F.email, pw = F.pw;
     if (!email || !pw) throw new Error("Indique ton e-mail et ton mot de passe.");
     const r = await S.store.signIn(email, pw);
     if (r && r.error) { if ((r.error.code || "") === "EMAIL_NOT_VERIFIED" || r.error.status === 403) { S.auth.screen = "code"; S.auth.msg = "Un code vient d'être envoyé à ton e-mail."; S.auth.msgOk = true; return; } throw r.error; }
     await afterSignIn();
   }),
-  "auth-signup": () => authRun(async () => {
-    const name = fv("au-name"), email = fv("au-email").toLowerCase(), pw = ($("#au-pw") || {}).value || ""; S.auth.email = email;
+  "auth-signup": () => authRun(async (F) => {
+    const name = F.name, email = F.email, pw = F.pw;
     if (!name || !email || pw.length < 8) throw new Error("Remplis ton prénom, ton e-mail et un mot de passe de 8 caractères minimum.");
     const r = await S.store.signUp(name, email, pw); if (r && r.error) throw r.error;
     S.auth.pendingName = name; S.auth.screen = "code"; S.auth.msg = "Compte créé : saisis le code reçu par e-mail."; S.auth.msgOk = true;
   }),
-  "auth-verify": () => authRun(async () => {
-    const otp = fv("au-otp"); if (otp.length < 6) throw new Error("Le code contient 6 chiffres.");
+  "auth-verify": () => authRun(async (F) => {
+    const otp = F.otp; if (otp.length < 6) throw new Error("Le code contient 6 chiffres.");
     const r = await S.store.verify(S.auth.email, otp); if (r && r.error) throw r.error;
     const sess = await S.store.session();
     if (!sess) { S.auth.screen = "login"; S.auth.msg = "E-mail confirmé ! Connecte-toi."; S.auth.msgOk = true; return; }
@@ -89,8 +93,8 @@ const A = {
     if (S.auth.pendingName && S.access && S.access.member && !S.profil.pseudo) { S.profil.pseudo = S.auth.pendingName; saveProfil(S.profil); }
   }),
   "auth-resend": () => authRun(async () => { const r = await S.store.resend(S.auth.email); if (r && r.error) throw r.error; S.auth.msg = "Nouveau code envoyé."; S.auth.msgOk = true; }),
-  "auth-forgot": () => authRun(async () => { const email = fv("au-email").toLowerCase(); S.auth.email = email; if (!email) throw new Error("Indique ton e-mail."); const r = await S.store.forgot(email); if (r && r.error) throw r.error; S.auth.screen = "reset"; S.auth.msg = "Code envoyé si un compte existe avec cet e-mail."; S.auth.msgOk = true; }),
-  "auth-reset": () => authRun(async () => { const otp = fv("au-otp"), pw = ($("#au-pw") || {}).value || ""; if (otp.length < 6 || pw.length < 8) throw new Error("Saisis le code et un mot de passe de 8 caractères minimum."); const r = await S.store.reset(S.auth.email, otp, pw); if (r && r.error) throw r.error; S.auth.screen = "login"; S.auth.msg = "Mot de passe modifié : connecte-toi."; S.auth.msgOk = true; }),
+  "auth-forgot": () => authRun(async (F) => { const email = F.email; if (!email) throw new Error("Indique ton e-mail."); const r = await S.store.forgot(email); if (r && r.error) throw r.error; S.auth.screen = "reset"; S.auth.msg = "Code envoyé si un compte existe avec cet e-mail."; S.auth.msgOk = true; }),
+  "auth-reset": () => authRun(async (F) => { const otp = F.otp, pw = F.pw; if (otp.length < 6 || pw.length < 8) throw new Error("Saisis le code et un mot de passe de 8 caractères minimum."); const r = await S.store.reset(S.auth.email, otp, pw); if (r && r.error) throw r.error; S.auth.screen = "login"; S.auth.msg = "Mot de passe modifié : connecte-toi."; S.auth.msgOk = true; }),
   "auth-recheck": () => authRun(afterSignIn),
   logout: async () => { await S.store.signOut(); lsDel(LS.demo); location.reload(); },
   demo: async () => { lsSet(LS.demo, "demo"); S.store = new DemoStore(); S.access = await S.store.myAccess(); await loadData(); if (!S.contacts.size) demoData(); render(); },
